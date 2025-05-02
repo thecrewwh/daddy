@@ -276,25 +276,23 @@ def channels():
 def PlayStream(link):
     try:
         headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl + '/'}
-        response = requests.get(link, headers=headers, timeout=10)
-        soup = re.findall(r'<iframe[^>]+src="([^"]+)"', response.text)
-        if not soup:
-            log("No iframe found")
-            return
-        url2 = soup[0]
+        response = requests.get(link, headers=headers, timeout=10).text
+        url2 = re.findall(r'iframe src="([^"]+)', response)[0]
+
         headers['Referer'] = headers['Origin'] = url2
-        response = requests.get(url2, headers=headers, timeout=10)
-        pattern = r'var\s+(\w+)\s*=\s*"([^"]+)"'
-        matches = re.findall(pattern, response.text)
-        variables = dict(matches)
-        channel_key = variables.get('channelKey')
-        if not channel_key:
-            log("No channelKey found")
-            return
-        server_lookup_url = f"https://{urlparse(url2).netloc}/server_lookup.php?channel_id={channel_key}"
+        response = requests.get(url2, headers=headers, timeout=10).text
+
+        channel_key = re.findall(r'r;\s*var channelKey = "([^"]*)', response)[0]
+        host = re.findall('(?s)var m3u8.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
+        server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        
+        server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
+
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
-        m3u8 = f'https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8'
+
+        
+        m3u8 = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
         referer = f'https://{urlparse(url2).netloc}'
         final_link = f'{m3u8}|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={UA}'
 
