@@ -68,17 +68,21 @@ def log(msg):
         except:
             pass
 
-
-
 def get_local_time(utc_time_str):
     try:
+        utc_now = datetime.utcnow()
         event_time_utc = datetime.strptime(utc_time_str, '%H:%M')
-    except TypeError:
-        event_time_utc = datetime(*(time.strptime(utc_time_str, '%H:%M')[0:6]))
-    timezone_offset_minutes = -300
-    event_time_local = event_time_utc + timedelta(minutes=timezone_offset_minutes)
-    local_time_str = event_time_local.strftime('%I:%M %p').lstrip('0')
-    return local_time_str
+        event_time_utc = event_time_utc.replace(year=utc_now.year, month=utc_now.month, day=utc_now.day)
+        event_time_utc = event_time_utc.replace(tzinfo=timezone.utc)
+
+        local_time = event_time_utc.astimezone()
+        local_time_str = local_time.strftime('%I:%M %p').lstrip('0')
+
+        return local_time_str
+    except Exception as e:
+        log(f"Failed to convert time: {e}")
+        return utc_time_str
+
 
 
 def build_url(query):
