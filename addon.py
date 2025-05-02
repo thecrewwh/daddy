@@ -291,10 +291,8 @@ def PlayStream(link):
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
 
-        
-        m3u8 = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
         referer = f'https://{urlparse(url2).netloc}'
-        final_link = f'{m3u8}|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={UA}'
+        final_link = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={UA}'
 
         liz = xbmcgui.ListItem('Daddylive', path=final_link)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
