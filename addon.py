@@ -74,16 +74,17 @@ def get_local_time(utc_time_str):
         event_time_utc = datetime.strptime(utc_time_str, '%H:%M')
         event_time_utc = event_time_utc.replace(year=utc_now.year, month=utc_now.month, day=utc_now.day)
         event_time_utc = event_time_utc.replace(tzinfo=timezone.utc)
-
         local_time = event_time_utc.astimezone()
-        local_time_str = local_time.strftime('%I:%M %p').lstrip('0')
+        time_format_pref = addon.getSetting('time_format')
+        if time_format_pref == '1':
+            local_time_str = local_time.strftime('%H:%M')
+        else:
+            local_time_str = local_time.strftime('%I:%M %p').lstrip('0')
 
         return local_time_str
     except Exception as e:
         log(f"Failed to convert time: {e}")
         return utc_time_str
-
-
 
 def build_url(query):
     return addon_url + '?' + urlencode(query)
@@ -279,7 +280,7 @@ def channels():
        # xbmcplugin.setResolvedUrl(addon_handle, True, liz)
 def PlayStream(link):
     try:
-        headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl + '/'}
+        headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
         url2 = re.findall(r'iframe src="([^"]+)', response)[0]
 
@@ -297,7 +298,7 @@ def PlayStream(link):
 
         referer = f'https://{urlparse(url2).netloc}'
         final_link = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={UA}'
-
+        
         liz = xbmcgui.ListItem('Daddylive', path=final_link)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
         liz.setMimeType('application/x-mpegURL')
