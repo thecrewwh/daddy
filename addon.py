@@ -216,8 +216,8 @@ def PlayStream(link):
         headers['Referer'] = headers['Origin'] = url2
         response = requests.get(url2, headers=headers, timeout=10).text
         channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
-        host = re.findall('(?s)const m3u8.*?:.*?:.*?\}([^$]*)', response)[0]
-        server_lookup = re.findall('fetchWithRetry\(`([^$]*)', response)[0]
+        host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
+        server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
