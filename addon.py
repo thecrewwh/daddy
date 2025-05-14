@@ -36,13 +36,12 @@ params = dict(parse_qsl(sys.argv[2][1:]))
 addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 
 mode = addon.getSetting('mode')
-baseurl = 'https://daddylive.mp/'
+baseurl = 'https://daddylive.dad/'
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
-UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 FANART = addon.getAddonInfo('fanart')
 ICON = addon.getAddonInfo('icon')
-
 
 def log(msg):
     LOGPATH = xbmcvfs.translatePath('special://logpath/')
@@ -55,8 +54,8 @@ def log(msg):
             raise TypeError('log() msg not of type str!')
 
         if not os.path.exists(LOG_FILE):
-            f = open(LOG_FILE, 'w', encoding='utf-8')
-            f.close()
+            with open(LOG_FILE, 'w', encoding='utf-8'):
+                pass
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             line = ('[{} {}]: {}').format(datetime.now().date(), str(datetime.now().time())[:8], _msg)
             f.write(line.rstrip('\r\n') + '\n')
@@ -65,7 +64,6 @@ def log(msg):
             xbmc.log(f'[ Daddylive ] Logging Failure: {e}', 2)
         except:
             pass
-
 
 def get_local_time(utc_time_str):
     try:
@@ -84,10 +82,8 @@ def get_local_time(utc_time_str):
         log(f"Failed to convert time: {e}")
         return utc_time_str
 
-
 def build_url(query):
     return addon_url + '?' + urlencode(query)
-
 
 def addDir(title, dir_url, is_folder=True):
     li = xbmcgui.ListItem(title)
@@ -104,25 +100,25 @@ def addDir(title, dir_url, is_folder=True):
     li.setProperty("IsPlayable", 'false' if is_folder else 'true')
     xbmcplugin.addDirectoryItem(handle=addon_handle, url=dir_url, listitem=li, isFolder=is_folder)
 
-
 def closeDir():
     xbmcplugin.endOfDirectory(addon_handle)
 
-
 def getKodiversion():
-    return int(xbmc.getInfoLabel("System.BuildVersion")[:2])
-
+    try:
+        return int(xbmc.getInfoLabel("System.BuildVersion")[:2])
+    except:
+        return 18
 
 def Main_Menu():
     menu = [
         ['LIVE SPORTS', 'sched'],
         ['LIVE TV', 'live_tv'],
         ['SEARCH EVENTS', 'search'],
+        ['SEARCH CHANNELS', 'search_channels'],
     ]
     for m in menu:
         addDir(m[0], build_url({'mode': 'menu', 'serv_type': m[1]}))
     closeDir()
-
 
 def getCategTrans():
     hea = {'User-Agent': UA, 'Referer': baseurl, 'Origin': baseurl}
@@ -137,7 +133,6 @@ def getCategTrans():
         return []
     return categs
 
-
 def Menu_Trans():
     categs = getCategTrans()
     if not categs:
@@ -146,13 +141,11 @@ def Menu_Trans():
         addDir(categ_name, build_url({'mode': 'showChannels', 'trType': categ_name}))
     closeDir()
 
-
 def ShowChannels(categ, channels_list):
     for item in channels_list:
         title = item.get('title')
         addDir(title, build_url({'mode': 'trList', 'trType': categ, 'channels': json.dumps(item.get('channels'))}), True)
     closeDir()
-
 
 def getTransData(categ):
     trns = []
@@ -175,14 +168,12 @@ def getTransData(categ):
                     log(f"Unexpected data structure in 'channels': {channels}")
     return trns
 
-
 def TransList(categ, channels):
     for channel in channels:
         channel_title = html.unescape(channel.get('channel_name'))
         channel_id = channel.get('channel_id')
         addDir(channel_title, build_url({'mode': 'trLinks', 'trData': json.dumps({'channels': [{'channel_name': channel_title, 'channel_id': channel_id}]})}), False)
     closeDir()
-
 
 def getSource(trData):
     data = json.loads(unquote(trData))
@@ -192,14 +183,11 @@ def getSource(trData):
         xbmcplugin.setContent(addon_handle, 'videos')
         PlayStream(url_stream)
 
-
 def list_gen():
-    addon_url = baseurl
     chData = channels()
     for c in chData:
-        addDir(c[1], build_url({'mode': 'play', 'url': addon_url + c[0]}), False)
+        addDir(c[1], build_url({'mode': 'play', 'url': baseurl + c[0]}), False)
     closeDir()
-
 
 def channels():
     url = baseurl + '/24-7-channels.php'
@@ -216,17 +204,20 @@ def channels():
             channels.append([c[0], c[2]])
     return channels
 
-
 def PlayStream(link):
     try:
         headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
-        url2 = re.findall(r'iframe src="([^"]+)', response)[0]
+        iframes = re.findall(r'iframe src="([^"]+)', response)
+        if not iframes:
+            log("No iframe src found")
+            return
+        url2 = iframes[0]
         headers['Referer'] = headers['Origin'] = url2
         response = requests.get(url2, headers=headers, timeout=10).text
-        channel_key = re.findall(r'r;\s*var channelKey = "([^"]*)', response)[0]
-        host = re.findall('(?s)var m3u8.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
-        server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
+        host = re.findall('(?s)const m3u8.*?:.*?:.*?\}([^$]*)', response)[0]
+        server_lookup = re.findall('fetchWithRetry\(`([^$]*)', response)[0]
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
@@ -243,10 +234,9 @@ def PlayStream(link):
         import traceback
         log(f"Error in PlayStream: {traceback.format_exc()}")
 
-
 def Search_Events():
     keyboard = xbmcgui.Dialog().input("Enter search term", type=xbmcgui.INPUT_ALPHANUM)
-    if not keyboard:
+    if not keyboard or keyboard.strip() == '':
         return
     term = keyboard.lower()
     results = []
@@ -268,6 +258,33 @@ def Search_Events():
         addDir(result['title'], build_url({'mode': 'trList', 'trType': 'search', 'channels': json.dumps(result['channels'])}), True)
     closeDir()
 
+def Search_Channels():
+    keyboard = xbmcgui.Dialog().input("Enter channel name", type=xbmcgui.INPUT_ALPHANUM)
+    if not keyboard or keyboard.strip() == '':
+        return
+    term = keyboard.lower()
+    results = []
+    categs = getCategTrans()
+    for categ_name, events_list_json in categs:
+        events_list = json.loads(events_list_json)
+        for item in events_list:
+            for channel in item.get('channels', []):
+                name = channel.get('channel_name', '')
+                if term in name.lower():
+                    title = html.unescape(name)
+                    results.append({
+                        'title': title,
+                        'channel_id': channel.get('channel_id')
+                    })
+    if not results:
+        xbmcgui.Dialog().ok("Search", "No matching channels found.")
+        return
+    for result in results:
+        addDir(result['title'], build_url({
+            'mode': 'trLinks',
+            'trData': json.dumps({'channels': [{'channel_name': result["title"], 'channel_id': result["channel_id"]}]})
+        }), False)
+    closeDir()
 
 kodiversion = getKodiversion()
 mode = params.get('mode', None)
@@ -283,6 +300,8 @@ else:
             list_gen()
         elif servType == 'search':
             Search_Events()
+        elif servType == 'search_channels':
+            Search_Channels()
 
     elif mode == 'showChannels':
         transType = params.get('trType')
