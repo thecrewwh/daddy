@@ -208,31 +208,54 @@ def PlayStream(link):
     try:
         headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
+
         iframes = re.findall(r'iframe src="([^"]+)', response)
         if not iframes:
             log("No iframe src found")
             return
+
         url2 = iframes[0]
         headers['Referer'] = headers['Origin'] = url2
         response = requests.get(url2, headers=headers, timeout=10).text
+
         channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
+        auth_ts = re.findall(r'(?s) authTs\s*= \"([^"]*)', response)[0]
+        auth_rnd = re.findall(r'(?s) authRnd\s*= \"([^"]*)', response)[0]
+        auth_sig = re.findall(r'(?s) authSig\s*= \"([^"]*)', response)[0]
+        auth_sig = quote_plus(auth_sig)
+        auth_host = re.findall(r'\}\s*fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        auth_url = f'{auth_host}{channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+        auth = requests.get(auth_url, headers=headers, timeout=10).text
+        
         host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
         server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
+
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
-        referer = f'https://{urlparse(url2).netloc}'
-        final_link = f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={UA}'
+
+        referer_raw = f'https://{urlparse(url2).netloc}'
+        referer = quote_plus(referer_raw)
+        ua_encoded = quote_plus(UA)
+
+        final_link = (
+            f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
+            f'|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={ua_encoded}'
+        )
+
         liz = xbmcgui.ListItem('Daddylive', path=final_link)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
         liz.setMimeType('application/x-mpegURL')
         liz.setProperty('inputstream.ffmpegdirect.is_realtime_stream', 'true')
         liz.setProperty('inputstream.ffmpegdirect.stream_mode', 'timeshift')
         liz.setProperty('inputstream.ffmpegdirect.manifest_type', 'hls')
+
         xbmcplugin.setResolvedUrl(addon_handle, True, liz)
+
     except Exception as e:
         import traceback
         log(f"Error in PlayStream: {traceback.format_exc()}")
+
 
 def Search_Events():
     keyboard = xbmcgui.Dialog().input("Enter search term", type=xbmcgui.INPUT_ALPHANUM)
