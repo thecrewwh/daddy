@@ -36,7 +36,9 @@ params = dict(parse_qsl(sys.argv[2][1:]))
 addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 
 mode = addon.getSetting('mode')
-baseurl = 'https://daddylive.dad/'
+main_url = requests.get('https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml').text
+baseurl = re.findall('src = "([^"]*)',main_url)[0]
+#baseurl = 'https://daddylive.dad/'
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
@@ -157,7 +159,7 @@ def getTransData(categ):
                 event = item.get('event')
                 time_str = item.get('time')
                 event_time_local = get_local_time(time_str)
-                title = f'{event_time_local} {event}'
+                title = f'[COLOR gold]{event_time_local}[/COLOR] {event}'
                 channels = item.get('channels')
                 if isinstance(channels, list) and all(isinstance(channel, dict) for channel in channels):
                     trns.append({
@@ -271,7 +273,7 @@ def Search_Events():
             if term in event_title.lower():
                 time_str = item.get('time')
                 event_time_local = get_local_time(time_str)
-                title = f'{event_time_local} {event_title}'
+                title = f'[COLOR gold]{event_time_local}[/COLOR] {event_title}'
                 channels = item.get('channels', [])
                 results.append({'title': title, 'channels': channels})
     if not results:
