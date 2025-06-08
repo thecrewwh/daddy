@@ -38,7 +38,7 @@ addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 mode = addon.getSetting('mode')
 main_url = requests.get('https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml').text
 baseurl = re.findall('src = "([^"]*)',main_url)[0]
-#baseurl = 'https://daddylive.dad/'
+#baseurl = 'https://daddylive.dad'
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
@@ -211,13 +211,21 @@ def PlayStream(link):
         headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
 
-        iframes = re.findall(r'iframe src="([^"]+)', response)
+        iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*<\/button>', response)
         if not iframes:
             log("No iframe src found")
             return
 
         url2 = iframes[0]
+        url2 = baseurl + url2
+        url2 = url2.replace('//cast','/cast')
         headers['Referer'] = headers['Origin'] = url2
+        response = requests.get(url2, headers=headers, timeout=10).text
+        iframes = re.findall(r'iframe src="([^"]*)', response)
+        if not iframes:
+            log("No iframe src found")
+            return
+        url2 = iframes[0]
         response = requests.get(url2, headers=headers, timeout=10).text
 
         channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
