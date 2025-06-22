@@ -229,12 +229,13 @@ def PlayStream(link):
         response = requests.get(url2, headers=headers, timeout=10).text
 
         channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
-        auth_ts = re.findall(r'(?s) authTs\s*= \"([^"]*)', response)[0]
-        auth_rnd = re.findall(r'(?s) authRnd\s*= \"([^"]*)', response)[0]
-        auth_sig = re.findall(r'(?s) authSig\s*= \"([^"]*)', response)[0]
+        auth_ts = re.findall(r'(?s)c = atob\("([^"]*)', response)[0]; auth_ts = base64.b64decode(auth_ts).decode('utf-8')
+        auth_rnd = re.findall(r'(?s)d = atob\("([^"]*)', response)[0]; auth_rnd = base64.b64decode(auth_rnd).decode('utf-8')
+        auth_sig = re.findall(r'(?s)e = atob\("([^"]*)', response)[0]; auth_sig = base64.b64decode(auth_sig).decode('utf-8')
         auth_sig = quote_plus(auth_sig)
-        auth_host = re.findall(r'\}\s*fetchWithRetry\(\s*\'([^\']*)', response)[0]
-        auth_url = f'{auth_host}{channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+        auth_host = re.findall(r'(?s)a = atob\("([^"]*)', response)[0]; auth_host = base64.b64decode(auth_host).decode('utf-8')
+        auth_php = re.findall(r'(?s)b = atob\("([^"]*)', response)[0]; auth_php = base64.b64decode(auth_php).decode('utf-8')
+        auth_url = f'{auth_host}{auth_host}?{channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
         auth = requests.get(auth_url, headers=headers, timeout=10).text
         
         host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
