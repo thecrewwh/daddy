@@ -235,9 +235,9 @@ def PlayStream(link):
         auth_sig = quote_plus(auth_sig)
         auth_host = re.findall(r'(?s)a = atob\("([^"]*)', response)[0]; auth_host = base64.b64decode(auth_host).decode('utf-8')
         auth_php = re.findall(r'(?s)b = atob\("([^"]*)', response)[0]; auth_php = base64.b64decode(auth_php).decode('utf-8')
-        auth_url = f'{auth_host}{auth_host}?{channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
+        auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
         auth = requests.get(auth_url, headers=headers, timeout=10).text
-        
+
         host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
         server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
 
