@@ -38,7 +38,6 @@ addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 mode = addon.getSetting('mode')
 main_url = requests.get('https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml').text
 baseurl = re.findall('src = "([^"]*)',main_url)[0]
-#baseurl = 'https://daddylive.dad'
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
@@ -54,7 +53,6 @@ def log(msg):
             _msg = f'\n    {msg}'
         else:
             raise TypeError('log() msg not of type str!')
-
         if not os.path.exists(LOG_FILE):
             with open(LOG_FILE, 'w', encoding='utf-8'):
                 pass
@@ -113,10 +111,11 @@ def getKodiversion():
 
 def Main_Menu():
     menu = [
-        ['LIVE SPORTS', 'sched'],
-        ['LIVE TV', 'live_tv'],
-        ['SEARCH EVENTS', 'search'],
-        ['SEARCH CHANNELS', 'search_channels'],
+        ['[B][COLOR gold]LIVE SPORTS[/COLOR][/B]', 'sched'],
+        ['[B][COLOR gold]LIVE TV[/COLOR][/B]', 'live_tv'],
+        ['[B][COLOR gold]SEARCH EVENTS[/COLOR][/B]', 'search'],
+        ['[B][COLOR gold]SEARCH CHANNELS[/COLOR][/B]', 'search_channels'],
+        ['[B][COLOR gold]REFRESH CATEGORIES[/COLOR][/B]', 'refresh_sched']
     ]
     for m in menu:
         addDir(m[0], build_url({'mode': 'menu', 'serv_type': m[1]}))
@@ -267,7 +266,6 @@ def PlayStream(link):
         import traceback
         log(f"Error in PlayStream: {traceback.format_exc()}")
 
-
 def Search_Events():
     keyboard = xbmcgui.Dialog().input("Enter search term", type=xbmcgui.INPUT_ALPHANUM)
     if not keyboard or keyboard.strip() == '':
@@ -336,6 +334,8 @@ else:
             Search_Events()
         elif servType == 'search_channels':
             Search_Channels()
+        elif servType == 'refresh_sched':
+            xbmc.executebuiltin('Container.Refresh')
 
     elif mode == 'showChannels':
         transType = params.get('trType')
