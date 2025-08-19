@@ -37,6 +37,7 @@ addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 
 mode = addon.getSetting('mode')
 main_url = requests.get('https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml').text
+#baseurl = 'https://thedaddy.top/'
 baseurl = re.findall('src = "([^"]*)',main_url)[0]
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
@@ -111,10 +112,10 @@ def getKodiversion():
 
 def Main_Menu():
     menu = [
-        ['[B][COLOR gold]LIVE SPORTS[/COLOR][/B]', 'sched'],
-        ['[B][COLOR gold]LIVE TV[/COLOR][/B]', 'live_tv'],
-        ['[B][COLOR gold]SEARCH EVENTS[/COLOR][/B]', 'search'],
-        ['[B][COLOR gold]SEARCH CHANNELS[/COLOR][/B]', 'search_channels'],
+        ['[B][COLOR gold]LIVE SPORTS SCHEDULE[/COLOR][/B]', 'sched'],
+        ['[B][COLOR gold]LIVE TV CHANNELS[/COLOR][/B]', 'live_tv'],
+        ['[B][COLOR gold]SEARCH EVENTS SCHEDULE[/COLOR][/B]', 'search'],
+        ['[B][COLOR gold]SEARCH LIVE TV CHANNELS[/COLOR][/B]', 'search_channels'],
         ['[B][COLOR gold]REFRESH CATEGORIES[/COLOR][/B]', 'refresh_sched']
     ]
     for m in menu:
@@ -225,20 +226,22 @@ def PlayStream(link):
             log("No iframe src found")
             return
         url2 = iframes[0]
+        headers['Referer'] = headers['Origin'] = url2
         response = requests.get(url2, headers=headers, timeout=10).text
+        parts = re.findall(r'(?s) BUNDLE = \"([^"]*)',response)[0]; parts = base64.b64decode(parts).decode('utf-8')
 
-        channel_key = re.findall(r'(?s) channelKey = \"([^"]*)', response)[0]
-        auth_ts = re.findall(r'(?s)c = atob\("([^"]*)', response)[0]; auth_ts = base64.b64decode(auth_ts).decode('utf-8')
-        auth_rnd = re.findall(r'(?s)d = atob\("([^"]*)', response)[0]; auth_rnd = base64.b64decode(auth_rnd).decode('utf-8')
-        auth_sig = re.findall(r'(?s)e = atob\("([^"]*)', response)[0]; auth_sig = base64.b64decode(auth_sig).decode('utf-8')
+        channel_key = re.findall(r'(?s) CHANNEL_KEY = "([^"]*)', response)[0]
+        auth_ts = re.findall(r'(?s)ts":"([^"]*)', parts)[0]; auth_ts = base64.b64decode(auth_ts).decode('utf-8')[0]
+        auth_rnd = re.findall(r'(?s)rnd":"([^"]*)', parts)[0]; auth_rnd = base64.b64decode(auth_rnd).decode('utf-8')
+        auth_sig = re.findall(r'(?s)sig":"([^"]*)', parts)[0]; auth_sig = base64.b64decode(auth_sig).decode('utf-8')
         auth_sig = quote_plus(auth_sig)
-        auth_host = re.findall(r'(?s)a = atob\("([^"]*)', response)[0]; auth_host = base64.b64decode(auth_host).decode('utf-8')
-        auth_php = re.findall(r'(?s)b = atob\("([^"]*)', response)[0]; auth_php = base64.b64decode(auth_php).decode('utf-8')
+        auth_host = re.findall(r'(?s)host":"([^"]*)', parts)[0]; auth_host = base64.b64decode(auth_host).decode('utf-8')
+        auth_php = re.findall(r'(?s)script":"([^"]*)', parts)[0]; auth_php = base64.b64decode(auth_php).decode('utf-8')
         auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
         auth = requests.get(auth_url, headers=headers, timeout=10).text
 
-        host = re.findall('(?s)m3u8 =.*?:.*?:.*?".*?".*?"([^"]*)', response)[0]
-        server_lookup = re.findall('n fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        host = re.findall('(?s)m3u8 =.*?`.*?`.*?`.*?}([^$]*)', response)[0]
+        server_lookup = re.findall('fetchWithRetry\(\s*\'([^\']*)', response)[0]
 
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
