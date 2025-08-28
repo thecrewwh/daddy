@@ -211,52 +211,70 @@ def PlayStream(link):
         headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
 
-        iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*<\/button>', response)
-        if not iframes:
-            log("No iframe src found")
-            return
+        if 'wikisport.best' in response:
+            for _ in range(3):
+                iframes = re.findall(r'iframe src="([^"]*)', response)
+                if not iframes:
+                    log("No iframe src found for wikisport.best")
+                    return
+                url2 = iframes[0]
+                headers['Referer'] = headers['Origin'] = url2
+                response = requests.get(url2, headers=headers, timeout=10).text
+        else:
+            iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', response)
+            if not iframes:
+                log("No iframe src found")
+                return
+            url2 = baseurl + iframes[0].replace('//cast', '/cast')
+            headers['Referer'] = headers['Origin'] = url2
+            response = requests.get(url2, headers=headers, timeout=10).text
 
-        url2 = iframes[0]
-        url2 = baseurl + url2
-        url2 = url2.replace('//cast','/cast')
-        headers['Referer'] = headers['Origin'] = url2
-        response = requests.get(url2, headers=headers, timeout=10).text
-        iframes = re.findall(r'iframe src="([^"]*)', response)
-        if not iframes:
-            log("No iframe src found")
-            return
-        url2 = iframes[0]
-        headers['Referer'] = headers['Origin'] = url2
-        response = requests.get(url2, headers=headers, timeout=10).text
-        parts = re.findall(r'(?s) BUNDLE = \"([^"]*)',response)[0]; parts = base64.b64decode(parts).decode('utf-8')
+            iframe_match = re.search(r'iframe src="([^"]*)', response)
+            if not iframe_match:
+                log("No iframe src found after player2")
+                return
+            url2 = iframe_match.group(1)
+            headers['Referer'] = headers['Origin'] = url2
+            response = requests.get(url2, headers=headers, timeout=10).text
 
-        channel_key = re.findall(r'(?s) CHANNEL_KEY = "([^"]*)', response)[0]
-        auth_ts = re.findall(r'(?s)ts":"([^"]*)', parts)[0]; auth_ts = base64.b64decode(auth_ts).decode('utf-8')[0]
-        auth_rnd = re.findall(r'(?s)rnd":"([^"]*)', parts)[0]; auth_rnd = base64.b64decode(auth_rnd).decode('utf-8')
-        auth_sig = re.findall(r'(?s)sig":"([^"]*)', parts)[0]; auth_sig = base64.b64decode(auth_sig).decode('utf-8')
-        auth_sig = quote_plus(auth_sig)
-        auth_host = re.findall(r'(?s)host":"([^"]*)', parts)[0]; auth_host = base64.b64decode(auth_host).decode('utf-8')
-        auth_php = re.findall(r'(?s)script":"([^"]*)', parts)[0]; auth_php = base64.b64decode(auth_php).decode('utf-8')
-        auth_url = f'{auth_host}{auth_php}?channel_id={channel_key}&ts={auth_ts}&rnd={auth_rnd}&sig={auth_sig}'
-        auth = requests.get(auth_url, headers=headers, timeout=10).text
+        channel_key = re.search(r'const\s+CHANNEL_KEY\s*=\s*"([^"]+)"', response).group(1)
+        bundle = re.search(r'const\s+XJZ\s*=\s*"([^"]+)"', response).group(1)
+        parts = json.loads(base64.b64decode(bundle).decode("utf-8"))
+        for k, v in parts.items():
+            parts[k] = base64.b64decode(v).decode("utf-8")
 
-        host = re.findall('(?s)m3u8 =.*?`.*?`.*?`.*?}([^$]*)', response)[0]
+        host_array_match = re.search(r"host\s*=\s*\[([^\]]+)\]", response)
+        if host_array_match:
+            host_parts = [part.strip().strip("'\"") for part in host_array_match.group(1).split(',')]
+            host = ''.join(host_parts)
+        else:
+            raise Exception("Could not find host array in response")
+
+        bx = [40, 60, 61, 33, 103, 57, 33, 57]
+        sc = ''.join(chr(b ^ 73) for b in bx)
+
+        auth_url = (
+            f'{host}{sc}?channel_id={quote_plus(channel_key)}&'
+            f'ts={quote_plus(parts["b_ts"])}&'
+            f'rnd={quote_plus(parts["b_rnd"])}&'
+            f'sig={quote_plus(parts["b_sig"])}'
+        )
+
         server_lookup = re.findall('fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        auth = requests.get(auth_url, headers=headers, timeout=10).text
 
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
         server_key = response['server_key']
 
-        referer_raw = f'https://{urlparse(url2).netloc}'
-        referer = quote_plus(referer_raw)
-        ua_encoded = quote_plus(UA)
+        host_raw = f'https://{urlparse(url2).netloc}'
+        if server_key == "top1/cdn":
+            m3u8 = f"https://top1.newkso.ru/top1/cdn/{channel_key}/mono.m3u8"
+        else:
+            m3u8 = f"https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8"
+        m3u8 = f'{m3u8}|Referer={host_raw}/&Origin={host_raw}&Connection=Keep-Alive&User-Agent={quote_plus(UA)}'
 
-        final_link = (
-            f'https://{server_key}{host}{server_key}/{channel_key}/mono.m3u8'
-            f'|Referer={referer}/&Origin={referer}&Connection=Keep-Alive&User-Agent={ua_encoded}'
-        )
-
-        liz = xbmcgui.ListItem('Daddylive', path=final_link)
+        liz = xbmcgui.ListItem('Daddylive', path=m3u8)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
         liz.setMimeType('application/x-mpegURL')
         liz.setProperty('inputstream.ffmpegdirect.is_realtime_stream', 'true')
