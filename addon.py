@@ -36,9 +36,7 @@ params = dict(parse_qsl(sys.argv[2][1:]))
 addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 
 mode = addon.getSetting('mode')
-main_url = requests.get('https://raw.githubusercontent.com/thecrewwh/dl_url/refs/heads/main/dl.xml').text
-#baseurl = 'https://thedaddy.top/'
-baseurl = re.findall('src = "([^"]*)',main_url)[0]
+baseurl = ''
 json_url = f'{baseurl}stream/stream-%s.php'
 schedule_url = baseurl + 'schedule/schedule-generated.php'
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
