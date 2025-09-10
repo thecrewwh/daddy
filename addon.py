@@ -19,7 +19,8 @@ import os
 import sys
 import json
 import html
-import base64
+from urllib.parse import urlencode, quote, unquote, parse_qsl, quote_plus, urlparse
+from datetime import datetime, timedelta, timezone
 import time
 import requests
 import xbmc
@@ -27,8 +28,7 @@ import xbmcvfs
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-from datetime import datetime, timezone
-from urllib.parse import urlencode, quote, unquote, parse_qsl, quote_plus, urlparse
+import base64
 
 addon_url = sys.argv[0]
 addon_handle = int(sys.argv[1])
@@ -36,31 +36,12 @@ params = dict(parse_qsl(sys.argv[2][1:]))
 addon = xbmcaddon.Addon(id='plugin.video.daddylive')
 
 mode = addon.getSetting('mode')
-BASE_SEED = ''
+baseurl = ''
+json_url = f'{baseurl}stream/stream-%s.php'
+schedule_url = baseurl + 'schedule/schedule-generated.php'
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
-_base_cache = None
-json_url = 'stream/stream-%s.php'
-schedule_rel = 'schedule/schedule-generated.php'
 FANART = addon.getAddonInfo('fanart')
 ICON = addon.getAddonInfo('icon')
-
-def get_active_base():
-    global _base_cache
-    if _base_cache:
-        return _base_cache
-    try:
-        r = requests.get(BASE_SEED, headers={'User-Agent': UA}, timeout=10, allow_redirects=True)
-        p = urlparse(r.url)
-        _base_cache = f'{p.scheme}://{p.netloc}/'
-    except:
-        _base_cache = BASE_SEED if BASE_SEED.endswith('/') else BASE_SEED + '/'
-    return _base_cache
-
-def url_from_base(path):
-    b = get_active_base()
-    if path.startswith('/'):
-        path = path[1:]
-    return b + path
 
 def log(msg):
     LOGPATH = xbmcvfs.translatePath('special://logpath/')
@@ -77,8 +58,11 @@ def log(msg):
         with open(LOG_FILE, 'a', encoding='utf-8') as f:
             line = ('[{} {}]: {}').format(datetime.now().date(), str(datetime.now().time())[:8], _msg)
             f.write(line.rstrip('\r\n') + '\n')
-    except:
-        pass
+    except (TypeError, Exception) as e:
+        try:
+            xbmc.log(f'[ Daddylive ] Logging Failure: {e}', 2)
+        except:
+            pass
 
 def get_local_time(utc_time_str):
     try:
@@ -89,10 +73,12 @@ def get_local_time(utc_time_str):
         local_time = event_time_utc.astimezone()
         time_format_pref = addon.getSetting('time_format')
         if time_format_pref == '1':
-            return local_time.strftime('%H:%M')
+            local_time_str = local_time.strftime('%H:%M')
         else:
-            return local_time.strftime('%I:%M %p').lstrip('0')
-    except:
+            local_time_str = local_time.strftime('%I:%M %p').lstrip('0')
+        return local_time_str
+    except Exception as e:
+        log(f"Failed to convert time: {e}")
         return utc_time_str
 
 def build_url(query):
@@ -101,7 +87,8 @@ def build_url(query):
 def addDir(title, dir_url, is_folder=True):
     li = xbmcgui.ListItem(title)
     labels = {'title': title, 'plot': title, 'mediatype': 'video'}
-    if getKodiversion() < 20:
+    kodiversion = getKodiversion()
+    if kodiversion < 20:
         li.setInfo("video", labels)
     else:
         infotag = li.getVideoInfoTag()
@@ -134,16 +121,15 @@ def Main_Menu():
     closeDir()
 
 def getCategTrans():
-    hea = {'User-Agent': UA, 'Referer': get_active_base(), 'Origin': get_active_base()}
+    hea = {'User-Agent': UA, 'Referer': baseurl, 'Origin': baseurl}
     categs = []
     try:
-        schedule_url = url_from_base(schedule_rel)
         schedule = requests.get(schedule_url, headers=hea, timeout=10).json()
-        for _, events in schedule.items():
+        for date_key, events in schedule.items():
             for categ, events_list in events.items():
                 categs.append((categ.replace('</span>', ''), json.dumps(events_list)))
-    except:
-        xbmcgui.Dialog().ok("Error", "Error fetching category data.")
+    except Exception as e:
+        xbmcgui.Dialog().ok("Error", f"Error fetching category data: {e}")
         return []
     return categs
 
@@ -176,8 +162,10 @@ def getTransData(categ):
                 if isinstance(channels, list) and all(isinstance(channel, dict) for channel in channels):
                     trns.append({
                         'title': title,
-                        'channels': [{'channel_name': c.get('channel_name'), 'channel_id': c.get('channel_id')} for c in channels]
+                        'channels': [{'channel_name': channel.get('channel_name'), 'channel_id': channel.get('channel_id')} for channel in channels]
                     })
+                else:
+                    log(f"Unexpected data structure in 'channels': {channels}")
     return trns
 
 def TransList(categ, channels):
@@ -191,40 +179,41 @@ def getSource(trData):
     data = json.loads(unquote(trData))
     channels_data = data.get('channels')
     if channels_data and isinstance(channels_data, list):
-        url_stream = url_from_base(json_url % channels_data[0]["channel_id"])
+        url_stream = f'{baseurl}stream/stream-{channels_data[0]["channel_id"]}.php'
         xbmcplugin.setContent(addon_handle, 'videos')
         PlayStream(url_stream)
 
 def list_gen():
     chData = channels()
     for c in chData:
-        addDir(c[1], build_url({'mode': 'play', 'url': url_from_base(c[0])}), False)
+        addDir(c[1], build_url({'mode': 'play', 'url': baseurl + c[0]}), False)
     closeDir()
 
 def channels():
-    url = url_from_base('/24-7-channels.php')
+    url = baseurl + '/24-7-channels.php'
     do_adult = xbmcaddon.Addon().getSetting('adult_pw')
-    hea = {'Referer': get_active_base(), 'user-agent': UA}
+    hea = {'Referer': baseurl + '/', 'user-agent': UA}
     resp = requests.post(url, headers=hea).text
-    ch_block = re.findall('<center><h1(.+?)tab-2', resp, re.DOTALL)
-    chan_data = re.findall('href="(.*?)" target.*?<strong>(.*?)</strong>', ch_block[0])
+    ch_block = re.compile('<center><h1(.+?)tab-2', re.MULTILINE | re.DOTALL).findall(str(resp))
+    chan_data = re.compile('href=\"(.*)\" target(.*)<strong>(.*)</strong>').findall(ch_block[0])
     channels = []
-    for href, title in chan_data:
-        if "18+" not in title:
-            channels.append([href, title])
-        if do_adult == 'lol' and "18+" in title:
-            channels.append([href, title])
+    for c in chan_data:
+        if not "18+" in c[2]:
+            channels.append([c[0], c[2]])
+        if do_adult == 'lol' and "18+" in c[2]:
+            channels.append([c[0], c[2]])
     return channels
 
 def PlayStream(link):
     try:
-        headers = {'User-Agent': UA, 'Referer': get_active_base(), 'Origin': get_active_base()}
+        headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
         response = requests.get(link, headers=headers, timeout=10).text
 
         if 'wikisport.best' in response:
             for _ in range(3):
                 iframes = re.findall(r'iframe src="([^"]*)', response)
                 if not iframes:
+                    log("No iframe src found for wikisport.best")
                     return
                 url2 = iframes[0]
                 headers['Referer'] = headers['Origin'] = url2
@@ -232,63 +221,67 @@ def PlayStream(link):
         else:
             iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', response)
             if not iframes:
+                log("No iframe src found")
                 return
-            url2 = url_from_base(iframes[0].replace('//cast', '/cast'))
+            url2 = baseurl + iframes[0].replace('//cast', '/cast')
             headers['Referer'] = headers['Origin'] = url2
             response = requests.get(url2, headers=headers, timeout=10).text
 
             iframe_match = re.search(r'iframe src="([^"]*)', response)
             if not iframe_match:
+                log("No iframe src found after player2")
                 return
             url2 = iframe_match.group(1)
             headers['Referer'] = headers['Origin'] = url2
             response = requests.get(url2, headers=headers, timeout=10).text
 
-        ck_match = re.search(r'const\s+CHANNEL_KEY\s*=\s*"([^"]+)"', response)
-        bundle_match = re.search(r'const\s+XJZ\s*=\s*"([^"]+)"', response)
-        if not ck_match or not bundle_match:
-            return
-        channel_key = ck_match.group(1)
-        bundle = bundle_match.group(1)
+        channel_key = re.search(r'const\s+CHANNEL_KEY\s*=\s*"([^"]+)"', response).group(1)
+        bundle = re.search(r'const\s+XJZ\s*=\s*"([^"]+)"', response).group(1)
         parts = json.loads(base64.b64decode(bundle).decode("utf-8"))
         for k, v in parts.items():
             parts[k] = base64.b64decode(v).decode("utf-8")
+
         host_array_match = re.search(r"host\s*=\s*\[([^\]]+)\]", response)
         if host_array_match:
             host_parts = [part.strip().strip("'\"") for part in host_array_match.group(1).split(',')]
             host = ''.join(host_parts)
         else:
-            return
+            raise Exception("Could not find host array in response")
+
         bx = [40, 60, 61, 33, 103, 57, 33, 57]
         sc = ''.join(chr(b ^ 73) for b in bx)
-        auth_url = f'{host}{sc}?channel_id={quote_plus(channel_key)}&ts={quote_plus(parts["b_ts"])}&rnd={quote_plus(parts["b_rnd"])}&sig={quote_plus(parts["b_sig"])}'
-        server_lookup_match = re.findall(r'fetchWithRetry\(\s*\'([^\']*)', response)
-        if not server_lookup_match:
-            return
-        server_lookup = server_lookup_match[0]
-        requests.get(auth_url, headers=headers, timeout=10)
+
+        auth_url = (
+            f'{host}{sc}?channel_id={quote_plus(channel_key)}&'
+            f'ts={quote_plus(parts["b_ts"])}&'
+            f'rnd={quote_plus(parts["b_rnd"])}&'
+            f'sig={quote_plus(parts["b_sig"])}'
+        )
+
+        server_lookup = re.findall('fetchWithRetry\(\s*\'([^\']*)', response)[0]
+        auth = requests.get(auth_url, headers=headers, timeout=10).text
+
         server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
         response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
-        server_key = response.get('server_key')
-        if not server_key:
-            return
+        server_key = response['server_key']
+
         host_raw = f'https://{urlparse(url2).netloc}'
         if server_key == "top1/cdn":
             m3u8 = f"https://top1.newkso.ru/top1/cdn/{channel_key}/mono.m3u8"
         else:
             m3u8 = f"https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8"
-        m3u8 += f'|Referer={host_raw}/&Origin={host_raw}&Connection=Keep-Alive&User-Agent={quote_plus(UA)}'
-        if not xbmc.getCondVisibility('System.HasAddon(inputstream.ffmpegdirect)'):
-            xbmcgui.Dialog().ok("Missing InputStream", "This stream requires the 'inputstream.ffmpegdirect' addon.")
-            return
+        m3u8 = f'{m3u8}|Referer={host_raw}/&Origin={host_raw}&Connection=Keep-Alive&User-Agent={quote_plus(UA)}'
+
         liz = xbmcgui.ListItem('Daddylive', path=m3u8)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
         liz.setMimeType('application/x-mpegURL')
         liz.setProperty('inputstream.ffmpegdirect.is_realtime_stream', 'true')
         liz.setProperty('inputstream.ffmpegdirect.stream_mode', 'timeshift')
         liz.setProperty('inputstream.ffmpegdirect.manifest_type', 'hls')
+
         xbmcplugin.setResolvedUrl(addon_handle, True, liz)
-    except:
+
+    except Exception as e:
         import traceback
         log(f"Error in PlayStream: {traceback.format_exc()}")
 
@@ -344,6 +337,9 @@ def Search_Channels():
         }), False)
     closeDir()
 
+kodiversion = getKodiversion()
+mode = params.get('mode', None)
+
 if not mode:
     Main_Menu()
 else:
@@ -359,17 +355,21 @@ else:
             Search_Channels()
         elif servType == 'refresh_sched':
             xbmc.executebuiltin('Container.Refresh')
+
     elif mode == 'showChannels':
         transType = params.get('trType')
         channels = getTransData(transType)
         ShowChannels(transType, channels)
+
     elif mode == 'trList':
         transType = params.get('trType')
         channels = json.loads(params.get('channels'))
         TransList(transType, channels)
+
     elif mode == 'trLinks':
         trData = params.get('trData')
         getSource(trData)
+
     elif mode == 'play':
         link = params.get('url')
         PlayStream(link)
