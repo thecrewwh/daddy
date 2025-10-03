@@ -12,50 +12,50 @@
 *
 ********************************************************cm*
 '''
-# pylint: disable-msg=F0401
 
 import re
 import os
 import sys
 import json
 import html
-from urllib.parse import urlencode, quote, unquote, parse_qsl, quote_plus, urlparse
-from datetime import datetime, timedelta, timezone
-import time
+import base64
+
+from urllib.parse import urlencode, unquote, parse_qsl, quote_plus, urlparse, urljoin
+from datetime import datetime, timezone
+
 import requests
 import xbmc
 import xbmcvfs
 import xbmcgui
 import xbmcplugin
 import xbmcaddon
-import base64
+
 
 addon_url = sys.argv[0]
 addon_handle = int(sys.argv[1])
 params = dict(parse_qsl(sys.argv[2][1:]))
 addon = xbmcaddon.Addon(id='plugin.video.daddylive')
-
 mode = addon.getSetting('mode')
-baseurl = ''
-json_url = f'{baseurl}stream/stream-%s.php'
-schedule_url = baseurl + 'schedule/schedule-generated.php'
+
 UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 FANART = addon.getAddonInfo('fanart')
 ICON = addon.getAddonInfo('icon')
 
+
+
 def log(msg):
-    LOGPATH = xbmcvfs.translatePath('special://logpath/')
-    FILENAME = 'daddylive.log'
-    LOG_FILE = os.path.join(LOGPATH, FILENAME)
+    logpath = xbmcvfs.translatePath('special://logpath/')
+    filename = 'daddylive.log'
+    log_file = os.path.join(logpath, filename)
     try:
         if isinstance(msg, str):
             _msg = f'\n    {msg}'
         else:
             raise TypeError('log() msg not of type str!')
-        if not os.path.exists(LOG_FILE):
-            with open(LOG_FILE, 'w', encoding='utf-8'):
+        if not os.path.exists(log_file):
+            with open(log_file, 'w', encoding='utf-8'):
                 pass
-        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+        with open(log_file, 'a', encoding='utf-8') as f:
             line = ('[{} {}]: {}').format(datetime.now().date(), str(datetime.now().time())[:8], _msg)
             f.write(line.rstrip('\r\n') + '\n')
     except (TypeError, Exception) as e:
@@ -63,6 +63,45 @@ def log(msg):
             xbmc.log(f'[ Daddylive ] Logging Failure: {e}', 2)
         except:
             pass
+
+def normalize_origin(url):
+    try:
+        u = urlparse(url)
+        return f'{u.scheme}://{u.netloc}/'
+    except:
+        return SEED_BASEURL
+
+def resolve_active_baseurl(seed):
+    try:
+        s = requests.Session()
+        headers = {'User-Agent': UA}
+        resp = s.get(seed, headers=headers, timeout=10, allow_redirects=True)
+        final = normalize_origin(resp.url if resp.url else seed)
+        return final
+    except Exception as e:
+        log(f'Active base resolve failed, using seed. Error: {e}')
+        return normalize_origin(seed)
+
+def get_active_base():
+    base = addon.getSetting('active_baseurl')
+    if not base:
+        base = resolve_active_baseurl(SEED_BASEURL)
+        addon.setSetting('active_baseurl', base)
+    if not base.endswith('/'):
+        base += '/'
+    return base
+
+def set_active_base(new_base: str):
+    if not new_base.endswith('/'):
+        new_base += '/'
+    addon.setSetting('active_baseurl', new_base)
+
+def abs_url(path: str) -> str:
+    return urljoin(get_active_base(), path.lstrip('/'))
+
+def _sched_headers():
+    base = get_active_base()
+    return {'User-Agent': UA, 'Referer': base, 'Origin': base}
 
 def get_local_time(utc_time_str):
     try:
@@ -114,24 +153,27 @@ def Main_Menu():
         ['[B][COLOR gold]LIVE TV CHANNELS[/COLOR][/B]', 'live_tv'],
         ['[B][COLOR gold]SEARCH EVENTS SCHEDULE[/COLOR][/B]', 'search'],
         ['[B][COLOR gold]SEARCH LIVE TV CHANNELS[/COLOR][/B]', 'search_channels'],
-        ['[B][COLOR gold]REFRESH CATEGORIES[/COLOR][/B]', 'refresh_sched']
+        ['[B][COLOR gold]REFRESH CATEGORIES[/COLOR][/B]', 'refresh_sched'],
+        ['[B][COLOR gold]SET ACTIVE DOMAIN (AUTO)[/COLOR][/B]', 'resolve_base_now'],
     ]
     for m in menu:
         addDir(m[0], build_url({'mode': 'menu', 'serv_type': m[1]}))
     closeDir()
 
 def getCategTrans():
-    hea = {'User-Agent': UA, 'Referer': baseurl, 'Origin': baseurl}
-    categs = []
+    hea = _sched_headers()
+    schedule_url = abs_url('schedule/schedule-generated.php')
     try:
         schedule = requests.get(schedule_url, headers=hea, timeout=10).json()
+        categs = []
         for date_key, events in schedule.items():
             for categ, events_list in events.items():
                 categs.append((categ.replace('</span>', ''), json.dumps(events_list)))
+        return categs
     except Exception as e:
         xbmcgui.Dialog().ok("Error", f"Error fetching category data: {e}")
+        log(f'schedule_url={schedule_url} active_base={get_active_base()}')
         return []
-    return categs
 
 def Menu_Trans():
     categs = getCategTrans()
@@ -179,26 +221,26 @@ def getSource(trData):
     data = json.loads(unquote(trData))
     channels_data = data.get('channels')
     if channels_data and isinstance(channels_data, list):
-        url_stream = f'{baseurl}stream/stream-{channels_data[0]["channel_id"]}.php'
+        url_stream = abs_url(f'stream/stream-{channels_data[0]["channel_id"]}.php')
         xbmcplugin.setContent(addon_handle, 'videos')
         PlayStream(url_stream)
 
 def list_gen():
     chData = channels()
     for c in chData:
-        addDir(c[1], build_url({'mode': 'play', 'url': baseurl + c[0]}), False)
+        addDir(c[1], build_url({'mode': 'play', 'url': abs_url(c[0])}), False)
     closeDir()
 
 def channels():
-    url = baseurl + '/24-7-channels.php'
+    url = abs_url('24-7-channels.php')
     do_adult = xbmcaddon.Addon().getSetting('adult_pw')
-    hea = {'Referer': baseurl + '/', 'user-agent': UA}
-    resp = requests.post(url, headers=hea).text
+    hea = {'Referer': get_active_base(), 'User-Agent': UA}
+    resp = requests.post(url, headers=hea, timeout=10).text
     ch_block = re.compile('<center><h1(.+?)tab-2', re.MULTILINE | re.DOTALL).findall(str(resp))
     chan_data = re.compile('href=\"(.*)\" target(.*)<strong>(.*)</strong>').findall(ch_block[0])
     channels = []
     for c in chan_data:
-        if not "18+" in c[2]:
+        if "18+" not in c[2]:
             channels.append([c[0], c[2]])
         if do_adult == 'lol' and "18+" in c[2]:
             channels.append([c[0], c[2]])
@@ -206,7 +248,8 @@ def channels():
 
 def PlayStream(link):
     try:
-        headers = {'User-Agent': UA, 'Referer': baseurl + '/', 'Origin': baseurl}
+        base = get_active_base()
+        headers = {'User-Agent': UA, 'Referer': base, 'Origin': base}
         response = requests.get(link, headers=headers, timeout=10).text
 
         if 'wikisport.best' in response:
@@ -219,11 +262,11 @@ def PlayStream(link):
                 headers['Referer'] = headers['Origin'] = url2
                 response = requests.get(url2, headers=headers, timeout=10).text
         else:
-            iframes = re.findall(r'<a[^>]*href="([^"]+)"[^>]*>\s*<button[^>]*>\s*Player\s*2\s*</button>', response)
+            iframes = re.findall(r'data-url="([^"]+)"\s+title="PLAYER 2"', response)
             if not iframes:
-                log("No iframe src found")
+                log("No iframe href found for Player 2")
                 return
-            url2 = baseurl + iframes[0].replace('//cast', '/cast')
+            url2 = abs_url(iframes[0].replace('//cast', '/cast'))
             headers['Referer'] = headers['Origin'] = url2
             response = requests.get(url2, headers=headers, timeout=10).text
 
@@ -235,8 +278,17 @@ def PlayStream(link):
             headers['Referer'] = headers['Origin'] = url2
             response = requests.get(url2, headers=headers, timeout=10).text
 
-        channel_key = re.search(r'const\s+CHANNEL_KEY\s*=\s*"([^"]+)"', response).group(1)
-        bundle = re.search(r'const\s+XJZ\s*=\s*"([^"]+)"', response).group(1)
+        ck_match = re.search(r'const\s+CHANNEL_KEY\s*=\s*"([^"]+)"', response)
+        if not ck_match:
+            log("CHANNEL_KEY pattern not found")
+            return
+        bundle_match = re.search(r'const\s+XKZK\s*=\s*"([^"]+)"', response)
+        if not bundle_match:
+            log("Missing XKZK bundle in response")
+            return
+        channel_key = ck_match.group(1)
+        bundle = bundle_match.group(1)
+
         parts = json.loads(base64.b64decode(bundle).decode("utf-8"))
         for k, v in parts.items():
             parts[k] = base64.b64decode(v).decode("utf-8")
@@ -246,7 +298,8 @@ def PlayStream(link):
             host_parts = [part.strip().strip("'\"") for part in host_array_match.group(1).split(',')]
             host = ''.join(host_parts)
         else:
-            raise Exception("Could not find host array in response")
+            log("Could not find host array in response")
+            return
 
         bx = [40, 60, 61, 33, 103, 57, 33, 57]
         sc = ''.join(chr(b ^ 73) for b in bx)
@@ -258,19 +311,28 @@ def PlayStream(link):
             f'sig={quote_plus(parts["b_sig"])}'
         )
 
-        server_lookup = re.findall('fetchWithRetry\(\s*\'([^\']*)', response)[0]
-        auth = requests.get(auth_url, headers=headers, timeout=10).text
+        server_lookup_match = re.findall(r'fetchWithRetry\(\s*\'([^\']*)', response)
+        if not server_lookup_match:
+            log("fetchWithRetry pattern not found")
+            return
+        server_lookup = server_lookup_match[0]
 
-        server_lookup_url = f"https://{urlparse(url2).netloc}{server_lookup}{channel_key}"
-        response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
-        server_key = response['server_key']
+        _ = requests.get(auth_url, headers=headers, timeout=10).text
 
         host_raw = f'https://{urlparse(url2).netloc}'
+        server_lookup_url = f"{host_raw}{server_lookup}{channel_key}"
+        response = requests.get(server_lookup_url, headers=headers, timeout=10).json()
+        server_key = response.get('server_key')
+        if not server_key:
+            log("No server_key in final response")
+            return
+
         if server_key == "top1/cdn":
             m3u8 = f"https://top1.newkso.ru/top1/cdn/{channel_key}/mono.m3u8"
         else:
             m3u8 = f"https://{server_key}new.newkso.ru/{server_key}/{channel_key}/mono.m3u8"
-        m3u8 = f'{m3u8}|Referer={host_raw}/&Origin={host_raw}&Connection=Keep-Alive&User-Agent={quote_plus(UA)}'
+
+        m3u8 += f'|Referer={host_raw}/&Origin={host_raw}&Connection=Keep-Alive&User-Agent={quote_plus(UA)}'
 
         liz = xbmcgui.ListItem('Daddylive', path=m3u8)
         liz.setProperty('inputstream', 'inputstream.ffmpegdirect')
@@ -337,6 +399,12 @@ def Search_Channels():
         }), False)
     closeDir()
 
+def refresh_active_base():
+    new_base = resolve_active_baseurl(SEED_BASEURL)
+    set_active_base(new_base)
+    xbmcgui.Dialog().ok("Daddylive", f"Active domain set to:\n{new_base}")
+    xbmc.executebuiltin('Container.Refresh')
+
 kodiversion = getKodiversion()
 mode = params.get('mode', None)
 
@@ -373,3 +441,6 @@ else:
     elif mode == 'play':
         link = params.get('url')
         PlayStream(link)
+
+    elif mode == 'resolve_base_now':
+        refresh_active_base()
